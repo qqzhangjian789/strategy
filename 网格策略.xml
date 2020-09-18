@@ -1,0 +1,210 @@
+<NAME>
+张健网格策略
+</NAME>
+<CODE>
+import time
+
+class mid_class():
+    
+    def __init__(self, this_exchaneg):
+        '''
+        初始化数据
+        :param this_exchaneg:  FMZ的交易所结构
+        '''
+        self.init_time = time.time()
+        self.exchange = this_exchaneg
+        self.name = self.exchange.GetName()  # 返回交易所名称
+        self.jyd = self.exchange.GetCurrency()  # 返回操作货币对名称 例：BTC_USD
+        
+    def get_account(self):
+        '''
+        账户信息
+        :return: 获取信息成功返回True 错误返回False
+        '''
+        try:
+            self.account = self.exchange.GetAccount()  # 返回交易所信息
+            self.Balance = self.account['Balance']  # 余额
+            self.amount = self.account['Stocks']  # 币种
+            self.FrozenBalance = self.account['FrozenBalance']  # 冻结钱
+            self.ForzenStocks = self.account['FrozenStocks']  # 冻结币
+            return self.account
+        except:
+            return False
+
+    def get_ticker(self):
+        '''
+        获取市场信息
+        :return:
+        '''
+        try:
+            self.ticker = self.exchange.GetTicker()  # 获取市场信息
+            return self.ticker
+        except:
+            return False
+
+    def get_depth(self):
+        '''
+        获取深度
+        :return:
+        '''
+        try:
+            self.depth = self.exchange.GetDepth()  # 获取交易所订单薄
+            self.ask = self.depth['Asks']  # 价格
+            self.bid = self.depth['Bids']  # 数量
+            return True
+        except:
+            return False
+
+    def get_oglc_data(self, Period=PERIOD_M5):
+        '''
+        K线
+        :param Period: K线周期 PERIOD_M1指1分钟,PERIOD_M5指5分钟,PERIOD_M15指15分钟,PERIOD_M30指30分钟,PERIOD_H1指1小时,PERIOD_D1指一天
+        :return:
+        '''
+        self.oglc_data = self.exchange.GetRecords(Period)
+
+    def create_order(self, order_tpye, price, account):
+        '''
+        创建订单
+        :param order_tpye: 挂单类型 buy买，sell 卖单
+        :param price:  价格
+        :param account: 数量
+        :return: 挂单id
+        '''
+        if order_tpye == 'buy':
+            try:
+                order_id = self.exchange.Buy(price, account)
+            except:
+                return False
+        elif order_tpye == 'sell':
+            try:
+                order_id = self.exchange.Sell(price, account)
+            except:
+                return False
+
+        return order_id
+
+    def cancel_order(self, order_id):
+        '''
+        取消挂单
+        order_id： 挂单id号
+        :return:
+        '''
+        return self.exchange.CancelOrder(order_id)
+
+    def refreash_data(self):
+        '''
+        刷新信息
+        :return: 刷新信息: 成功refreash_data_finish
+        '''
+
+        if not self.get_account():
+            return 'false_get_account'
+
+        if not self.get_ticker():
+            return 'false_get_ticker'
+
+        if not self.get_depth():
+            return 'false_get_depth'
+        try:
+            self.get_oglc_data()
+        except:
+            return 'false_get_K_line_info'
+
+        return 'refreash_data_finish!'
+
+def main():
+    test_mid = mid_class(exchange)
+    Log(exchange.GetName())
+    Log(exchange.GetCurrency())
+    
+    price = 2.499  #基价
+    buy_wave = 0.003  # 买入比
+    sell_wave = 0.003 # 卖出比
+    stock = 8000  # 现货数量
+    amount = 0   #买单数量
+    
+    Log('刷新信息', test_mid.refreash_data())
+    
+   
+
+    while True:
+        Sleep(1000)
+       
+    
+    
+        exchange.SetDirection("buy")
+        robot_buy = test_mid.create_order('buy', price - price * buy_wave, round((stock + amount) * (price *buy_wave) / 2 / (price - price * buy_wave),0))
+        
+        robot_buy_id = exchange.GetOrder(robot_buy)
+
+        exchange.SetDirection("sell")
+        robot_sell = test_mid.create_order('sell', price + price * sell_wave, round((stock + amount) * (price * sell_wave) / 2 / (price + price * sell_wave),0))
+        robot_sell_id = exchange.GetOrder(robot_sell)
+
+        while True:
+
+            Sleep(1000)
+            
+            buy_wcj = exchange.GetOrder(robot_buy_id['Id'])
+            sell_wcj = exchange.GetOrder(robot_sell_id['Id'])
+            
+            # 买单成交逻辑
+            if buy_wcj['Status'] == 1:
+                #  买单全部成交
+                if buy_wcj['Amount'] == buy_wcj["DealAmount"]:
+                    price = buy_wcj["Price"]
+                    Log('买单全部成交，撤销订单，成交价格:',price)
+                    test_mid.cancel_order(robot_sell_id['Id'])
+                    break
+                 #  买单全部成交，卖单部分成交
+                elif buy_wcj["Amount"] == buy_wcj["DealAmount"] and sell_wcj["Status"] == 1:
+                    price = buy_wcj['Price']
+                    Log('买单全部成交，卖单部分成交，成交价格：',price)
+                    break
+            # 卖单成交逻辑
+            elif sell_wcj['Status'] == 1:
+                # 卖单全部成交
+                if sell_wcj['Amount'] == sell_wcj['DealAmount']:
+                    price = sell_wcj['Price']
+                    Log('卖单全部成交，撤销订单,成交价格：',price)
+                    test_mid.cancel_order(robot_buy_id['Id'])
+                    break 
+                # 卖单全部成交，买单部分成交
+                elif sell_wcj['Amount'] == sell_wcj['DealAmount'] and buy_wcj['Status'] == 1:
+                    price = robot_buy_id['Price']
+                    Log('卖单全部成交，买单部分成交,成交价格:',price)
+                    break 
+            # 买单卖单同时全部成交
+            elif buy_wcj['Amount'] == buy_wcj['DealAmount'] and sell_wcj['Amount'] == sell_wcj['DealAmount']:
+                    break
+            
+            
+
+        try:
+            position = exchange.GetPosition()
+            amount = position[0].Amount
+            amount = round(amount,0)
+            Log('amount',amount)
+        except:
+            amount = 0
+        # (stock' + '持仓') * wave / 2 / '下单价格' == ‘卖出多少币’
+        Log(test_mid.get_depth())
+        Log('账户信息', test_mid.get_account())
+        Log('持仓信息', exchange.GetPosition())
+
+
+
+</CODE>
+<LANG>
+1
+</LANG>
+<TYPE>
+0
+</TYPE>
+<DEPENDS>
+221056
+</DEPENDS>
+<TIME>
+2020-09-12 09:48:15
+</TIME>
